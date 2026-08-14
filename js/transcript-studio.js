@@ -70,8 +70,8 @@
       <div class="ts-pro">
         <div class="ts-upload-shell">
           <div class="ts-brand-mark"><i class="fas fa-waveform-lines"></i></div>
-          <div class="ts-pro-title">Conversation Notes <span>Audio &amp; call notes</span></div>
-          <p class="ts-pro-subtitle">Turn a call recording into clean, searchable notes. Upload your recording, choose your preferred quality, and review the result before exporting.</p>
+          <div class="ts-pro-title">OPUS to Text <span>Local audio transcription</span></div>
+          <p class="ts-pro-subtitle">Convert OPUS and other supported recordings into clean, searchable text. Processing uses the project's local speech-recognition service—no Gemini, Puter, or generative AI is used.</p>
 
           <div class="ts-source-tabs" role="tablist">
             <button class="ts-source-tab active" data-source-tab="file"><i class="far fa-file-audio"></i> File upload</button>
@@ -85,7 +85,7 @@
               <h3>Click or drag &amp; drop to upload your file</h3>
               <p>OPUS, OGG, WAV, MP3, M4A, MP4, WebM, FLAC, TXT, SRT, VTT and CSV</p>
               <button class="ts-primary-btn" id="tsChooseFile"><i class="fas fa-upload"></i> Upload a file</button>
-              <small>Your recording is processed by your configured workspace service and is not sent to a third-party AI analysis tool.</small>
+              <small>Your recording is sent only to your configured ScriptFlow Pro transcription server and processed by its local speech-recognition engine.</small>
             </div>
           </div>
 
@@ -99,8 +99,8 @@
           </div>
 
           <div class="ts-capability-row">
-            <span><i class="fas fa-language"></i> 20+ languages</span>
-            <span><i class="fas fa-microchip"></i> Fast conversation processing</span>
+            <span><i class="fas fa-language"></i> Multiple languages</span>
+            <span><i class="fas fa-microchip"></i> Local speech recognition</span>
             <span><i class="fas fa-file-export"></i> SRT / VTT / TXT / CSV</span>
           </div>
           <div class="ts-error" id="tsUploadError" hidden></div>

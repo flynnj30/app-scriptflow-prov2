@@ -10,7 +10,7 @@ services:
       - key: MAX_UPLOAD_MB
         value: "500"
       - key: WHISPER_DEFAULT_MODEL
-        value: "tiny"
+        value: "base"
       - key: WHISPER_DEVICE
         value: "cpu"
       - key: WHISPER_COMPUTE_TYPE

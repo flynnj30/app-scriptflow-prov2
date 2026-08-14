@@ -19,7 +19,7 @@ except ImportError as exc:  # pragma: no cover - handled with a clear health res
 else:
     FASTER_WHISPER_IMPORT_ERROR = ""
 
-APP_NAME = "ScriptFlow Pro Conversation Processing"
+APP_NAME = "ScriptFlow Pro Local Audio Transcription"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
@@ -179,7 +179,8 @@ async def health():
     return {
         "status": "ok" if WhisperModel is not None else "degraded",
         "service": APP_NAME,
-        "provider": "faster-whisper",
+        "provider": "local-speech-recognition",
+        "engine": "faster-whisper",
         "default_model": DEFAULT_MODEL,
         "device": DEVICE,
         "compute_type": _compute_type(),

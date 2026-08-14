@@ -197,6 +197,25 @@ async def root():
     return {"service": APP_NAME, "status": "ok"}
 
 
+@app.get("/transcribe", include_in_schema=False)
+async def transcribe_info():
+    """Human-friendly GET response for browser checks.
+
+    Actual transcription remains POST-only because it requires a multipart
+    audio upload. This avoids a confusing 405 when someone opens the route
+    directly in a browser while preserving the existing API contract.
+    """
+    return {
+        "status": "ready",
+        "method": "POST",
+        "endpoint": "/transcribe",
+        "message": "Upload an audio file with a POST multipart/form-data request to transcribe it.",
+        "supported_models": sorted(MODEL_ALIASES.keys()),
+        "supported_formats": ["json", "txt", "srt"],
+        "max_upload_mb": MAX_UPLOAD_MB,
+    }
+
+
 @app.post("/transcribe")
 async def transcribe(
     file: Annotated[UploadFile, File(...)],

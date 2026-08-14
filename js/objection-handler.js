@@ -1,24 +1,18 @@
 // ================================================================
-// OBJECTION HANDLER - SENIOR SETTER/BOOKER (SIDE BANNER)
-// TOP-LEFT TRIGGER BUTTON - ALWAYS VISIBLE
-// ALL OBJECTIONS FROM ORIGINAL REQUIREMENTS
+// OBJECTION HANDLER - INTEGRATED INTO SCRIPT MODAL
 // ================================================================
 
 const ObjectionHandler = {
-    // State
     isOpen: false,
     currentCategory: 'reflex',
-    currentObjection: null,
     expandedCards: new Set(),
-    isAnimating: false,
+    initialized: false,
     
-    // Data - Complete Objection Library (ALL objections from original requirements)
     categories: {
         reflex: {
             label: '🔄 Reflex Brush-Offs',
             icon: '🔄',
             color: '#f59e0b',
-            description: 'Quick objections before they\'ve even thought about it',
             objections: [
                 {
                     id: 'not_interested',
@@ -56,7 +50,6 @@ const ObjectionHandler = {
             label: '💼 "We Don\'t Need It"',
             icon: '💼',
             color: '#3b82f6',
-            description: 'They think they\'re already sorted - gently challenge it',
             objections: [
                 {
                     id: 'already_website',
@@ -106,7 +99,6 @@ const ObjectionHandler = {
             label: '❓ Skeptical Questions',
             icon: '❓',
             color: '#8b5cf6',
-            description: 'Fair questions, not real objections - answer simply and stay relaxed',
             objections: [
                 {
                     id: 'how_much',
@@ -144,7 +136,6 @@ const ObjectionHandler = {
             label: '🚪 Gatekeepers',
             icon: '🚪',
             color: '#ef4444',
-            description: 'Receptionist or employee - be friendly and get a time',
             objections: [
                 {
                     id: 'owner_not_in',
@@ -156,199 +147,69 @@ const ObjectionHandler = {
         }
     },
     
-    // Additional scripts from original requirements
-    additionalScripts: {
-        reflex_extra: [
-            {
-                id: 'not_interested_v2',
-                objection: '"Not interested."',
-                response: 'No problem at all. We\'ve already built a version of your website, and it\'s yours to see for free. Would you be open to just taking a quick look?',
-                tip: 'Keep it casual and reiterate the "free" aspect.'
-            },
-            {
-                id: 'too_busy_v2',
-                objection: '"I\'m swamped."',
-                response: 'I hear you. I won\'t take up your time now. I\'d love to show you the website another day—it only takes about 10 minutes to walk through.',
-                tip: 'Empathize and minimize the time commitment.'
-            },
-            {
-                id: 'send_info_v2',
-                objection: '"Shoot me an email."',
-                response: 'I\'d be happy to, but honestly, the website is really something you need to see. It only takes 10 minutes to walk through live.',
-                tip: 'Pivot from email to a live walkthrough.'
-            }
-        ],
-        existing_extra: [
-            {
-                id: 'already_have_website_v2',
-                objection: '"We have a site already."',
-                response: 'That\'s great! When was it last refreshed? We put together a modern version for your business—it might be worth comparing.',
-                tip: 'Focus on "modern" and "compare" to create curiosity.'
-            },
-            {
-                id: 'no_need_website_v2',
-                objection: '"We don\'t need a site."',
-                response: 'Fair enough. But a good site brings in more jobs and gets you found online. You\'re not saying no to more business, right? And it\'s free to preview.',
-                tip: 'Connect the website to more business opportunities.'
-            },
-            {
-                id: 'do_it_myself_v2',
-                objection: '"I can do it myself."',
-                response: 'That\'s awesome. How far along are you? What if it was already done for you by the end of this week?',
-                tip: 'Challenge their timeline gently with a faster alternative.'
-            },
-            {
-                id: 'have_designer_v2',
-                objection: '"We have a designer."',
-                response: 'Options are always good, right? There\'s a difference between a basic site and one done well. And checking ours out is completely free.',
-                tip: 'Position as a free option to evaluate.'
-            },
-            {
-                id: 'someone_working_v2',
-                objection: '"Someone\'s on it."',
-                response: 'Perfect. Then you should definitely see ours—worst case, you get ideas. Best case, you like ours better.',
-                tip: 'Friendly competition to generate interest.'
-            },
-            {
-                id: 'word_of_mouth_v2',
-                objection: '"Word of mouth works for us."',
-                response: 'Word of mouth is powerful! But it only reaches people who already know you. A website reaches everyone searching for what you do right now.',
-                tip: 'Show the gap between word-of-mouth and online visibility.'
-            },
-            {
-                id: 'too_small_v2',
-                objection: '"We\'re just a small business."',
-                response: 'That\'s exactly where a website makes the biggest impact. It levels the playing field with the big guys.',
-                tip: 'Flip "too small" into a strength.'
-            }
-        ],
-        skeptical_extra: [
-            {
-                id: 'how_much_v2',
-                objection: '"What\'s the cost?"',
-                response: 'The walkthrough is 100% free. Pricing varies based on what you need, but it\'s very affordable. My colleague covers all the details on the call.',
-                tip: 'Deflect pricing to the closer while emphasizing free.'
-            },
-            {
-                id: 'whats_catch_v2',
-                objection: '"What\'s the catch?"',
-                response: 'No catch whatsoever. If you love it, you can work with us to launch it. If not, we part ways with no hard feelings.',
-                tip: 'Direct, transparent answer builds trust.'
-            },
-            {
-                id: 'will_help_v2',
-                objection: '"Will this actually help?"',
-                response: 'Absolutely. You\'ll be easier to find on Google, look more professional, and make it easier for customers to reach you. A website drives business.',
-                tip: 'Focus on concrete, measurable benefits.'
-            },
-            {
-                id: 'got_number_v2',
-                objection: '"Where did you get my number?"',
-                response: 'We found your business on Google and noticed you didn\'t have a website linked to your profile.',
-                tip: 'Be specific and honest.'
-            },
-            {
-                id: 'are_you_local_v2',
-                objection: '"Are you local?"',
-                response: 'We\'re based in Delaware but work with businesses like yours nationwide. Our focus is helping you show up better in your local area.',
-                tip: 'Acknowledge location while emphasizing local results.'
-            }
-        ]
-    },
-    
-    // Initialize the banner
     init: function() {
-        this.createSideBanner();
-        this.loadState();
+        if (this.initialized) return;
+        this.initialized = true;
+        this.createIntegratedUI();
         this.attachEvents();
-        this.updateTriggerBadge();
-        console.log('🛡️ Objection Handler side banner initialized - Click 🛡️ in top-left to open');
+        console.log('🎯 Objection Handler initialized');
     },
     
-    // Create the side banner HTML
-    createSideBanner: function() {
-        const existingBanner = document.getElementById('objectionSideBanner');
-        if (existingBanner) existingBanner.remove();
+    createIntegratedUI: function() {
+        const container = document.getElementById('objectionHandlerContainer');
+        if (!container) return;
         
-        // Create the trigger button (floating - TOP LEFT)
-        const trigger = document.createElement('button');
-        trigger.id = 'objectionTriggerBtn';
-        trigger.className = 'objection-trigger-btn objection-trigger-top-left';
-        trigger.setAttribute('aria-label', 'Toggle Objection Handler');
-        trigger.innerHTML = `
-            <span class="objection-trigger-icon">🛡️</span>
-            <span class="objection-trigger-badge" id="objectionBadge">${this.getTotalObjectionCount()}</span>
-            <span class="objection-trigger-tooltip">Objection Handler</span>
-        `;
-        document.body.appendChild(trigger);
-        
-        // Create the side banner (opens from LEFT side now)
-        const banner = document.createElement('div');
-        banner.id = 'objectionSideBanner';
-        banner.className = 'objection-side-banner objection-side-banner-left';
-        banner.setAttribute('role', 'complementary');
-        banner.setAttribute('aria-label', 'Objection Handling Reference');
-        banner.setAttribute('aria-hidden', 'true');
-        banner.innerHTML = `
-            <div class="objection-side-header">
-                <div class="objection-side-title">
-                    <span class="objection-side-icon">🛡️</span>
-                    <div>
-                        <h3>Objection Handler</h3>
-                        <p>Senior Setter/Booker Reference</p>
+        container.innerHTML = `
+            <div class="objection-integrated">
+                <div class="objection-integrated-header" id="objectionIntegratedToggle">
+                    <div class="objection-integrated-title">
+                        <span class="objection-icon">🛡️</span>
+                        <span class="objection-title">Objection Handling Scripts</span>
+                        <span class="objection-badge">${this.getTotalObjectionCount()} scripts</span>
+                    </div>
+                    <div class="objection-integrated-controls">
+                        <button class="objection-minimize-btn" id="objectionMinimizeBtn" title="Minimize">
+                            <i class="fas fa-chevron-up"></i>
+                        </button>
                     </div>
                 </div>
-                <button class="objection-side-close-btn" id="objectionCloseBtn" aria-label="Close objection handler">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <div class="objection-side-body">
-                <div class="objection-side-nav" id="objectionSideNav">
-                    ${Object.entries(this.categories).map(([key, cat]) => `
-                        <button class="objection-nav-btn ${key === this.currentCategory ? 'active' : ''}" data-category="${key}" style="border-color:${cat.color};">
-                            <span class="nav-icon">${cat.icon}</span>
-                            <span class="nav-label">${cat.label}</span>
-                            <span class="nav-count">${cat.objections.length}</span>
-                        </button>
-                    `).join('')}
-                </div>
-                <div class="objection-side-cards" id="objectionSideCards">
-                    ${this.renderCards(this.currentCategory)}
-                </div>
-                <div class="objection-side-footer">
-                    <div class="objection-footer-tip">
-                        <i class="fas fa-lightbulb"></i>
-                        <span>Your best tool: the offer itself. Free, already built, no obligation.</span>
+                <div class="objection-integrated-body" id="objectionIntegratedBody">
+                    <div class="objection-category-nav" id="objectionCategoryNav">
+                        ${Object.entries(this.categories).map(([key, cat]) => `
+                            <button class="objection-category-btn ${key === this.currentCategory ? 'active' : ''}" data-category="${key}" style="border-color:${cat.color};">
+                                <span class="category-icon">${cat.icon}</span>
+                                <span class="category-label">${cat.label}</span>
+                                <span class="category-count">${cat.objections.length}</span>
+                            </button>
+                        `).join('')}
                     </div>
-                    <div class="objection-footer-actions">
-                        <button class="objection-expand-all-btn" id="objectionSideExpandAll">
-                            <i class="fas fa-expand-alt"></i> Expand All
-                        </button>
-                        <button class="objection-collapse-all-btn" id="objectionSideCollapseAll">
-                            <i class="fas fa-compress-alt"></i> Collapse All
-                        </button>
+                    <div class="objection-cards-container" id="objectionCardsContainer">
+                        ${this.renderCards(this.currentCategory)}
+                    </div>
+                    <div class="objection-footer">
+                        <div class="objection-footer-tip">
+                            <i class="fas fa-lightbulb"></i>
+                            <span>Your single best tool is the offer itself. The website is already built, it's free, and there's no obligation.</span>
+                        </div>
+                        <div class="objection-footer-actions">
+                            <button class="objection-expand-all-btn" id="objectionExpandAll">
+                                <i class="fas fa-expand"></i> Expand All
+                            </button>
+                            <button class="objection-collapse-all-btn" id="objectionCollapseAll">
+                                <i class="fas fa-compress"></i> Collapse All
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
         `;
-        document.body.appendChild(banner);
     },
     
-    // Render cards for a category
     renderCards: function(categoryKey) {
         const category = this.categories[categoryKey];
         if (!category) return '<div class="objection-empty">No objections in this category.</div>';
         
-        // Combine main objections with any additional ones for this category
-        let allObjections = [...category.objections];
-        
-        // Add extra scripts if they exist for this category
-        const extraKey = categoryKey + '_extra';
-        if (this.additionalScripts[extraKey]) {
-            allObjections = [...allObjections, ...this.additionalScripts[extraKey]];
-        }
-        
-        return allObjections.map(obj => `
+        return category.objections.map(obj => `
             <div class="objection-card ${this.expandedCards.has(obj.id) ? 'expanded' : ''}" data-id="${obj.id}">
                 <div class="objection-card-header" data-id="${obj.id}">
                     <span class="objection-card-icon">💬</span>
@@ -359,7 +220,7 @@ const ObjectionHandler = {
                 </div>
                 <div class="objection-card-body" style="${this.expandedCards.has(obj.id) ? 'display:block;' : 'display:none;'}">
                     <div class="objection-response">
-                        <div class="objection-response-label">🎯 Response</div>
+                        <div class="objection-response-label">🎯 Recommended Response</div>
                         <div class="objection-response-text">${obj.response}</div>
                     </div>
                     <div class="objection-tip">
@@ -368,7 +229,7 @@ const ObjectionHandler = {
                     </div>
                     <div class="objection-card-actions">
                         <button class="objection-copy-btn" data-response="${obj.response.replace(/"/g, '&quot;')}">
-                            <i class="fas fa-copy"></i> Copy
+                            <i class="fas fa-copy"></i> Copy Response
                         </button>
                         <button class="objection-practice-btn" data-objection="${obj.objection.replace(/"/g, '&quot;')}" data-response="${obj.response.replace(/"/g, '&quot;')}">
                             <i class="fas fa-microphone"></i> Practice
@@ -379,119 +240,66 @@ const ObjectionHandler = {
         `).join('');
     },
     
-    // Get total objection count
     getTotalObjectionCount: function() {
         let count = 0;
         for (const category of Object.values(this.categories)) {
             count += category.objections.length;
         }
-        // Add extra scripts
-        for (const key of Object.keys(this.additionalScripts)) {
-            count += this.additionalScripts[key].length;
-        }
         return count;
     },
     
-    // Load state from localStorage
-    loadState: function() {
-        try {
-            const saved = localStorage.getItem('objectionHandlerState');
-            if (saved) {
-                const state = JSON.parse(saved);
-                this.isOpen = state.isOpen || false;
-                this.currentCategory = state.currentCategory || 'reflex';
-                this.expandedCards = new Set(state.expandedCards || []);
-            }
-        } catch (e) {
-            console.warn('Failed to load objection handler state:', e);
-        }
-    },
-    
-    // Save state to localStorage
-    saveState: function() {
-        try {
-            localStorage.setItem('objectionHandlerState', JSON.stringify({
-                isOpen: this.isOpen,
-                currentCategory: this.currentCategory,
-                expandedCards: Array.from(this.expandedCards)
-            }));
-        } catch (e) {
-            console.warn('Failed to save objection handler state:', e);
-        }
-    },
-    
-    // Toggle banner open/close
     toggleBanner: function() {
-        if (this.isAnimating) return;
-        this.isAnimating = true;
-        
         this.isOpen = !this.isOpen;
-        const banner = document.getElementById('objectionSideBanner');
-        const trigger = document.getElementById('objectionTriggerBtn');
+        const body = document.getElementById('objectionIntegratedBody');
+        const container = document.getElementById('objectionHandlerContainer');
+        const toggleBtn = document.getElementById('objectionToggleBtn');
+        const minimizeBtn = document.getElementById('objectionMinimizeBtn');
         
-        if (banner) {
-            banner.classList.toggle('open', this.isOpen);
-            banner.setAttribute('aria-hidden', !this.isOpen);
-        }
-        if (trigger) {
-            trigger.classList.toggle('active', this.isOpen);
+        if (container) {
+            container.style.display = this.isOpen ? 'block' : 'none';
         }
         
-        // Update body class to prevent scroll when open
-        document.body.classList.toggle('objection-banner-open', this.isOpen);
-        
-        setTimeout(() => {
-            this.isAnimating = false;
-        }, 350);
-        
-        this.saveState();
-        this.updateTriggerBadge();
-    },
-    
-    // Open banner
-    openBanner: function() {
-        if (this.isOpen || this.isAnimating) return;
-        this.toggleBanner();
-    },
-    
-    // Close banner
-    closeBanner: function() {
-        if (!this.isOpen || this.isAnimating) return;
-        this.toggleBanner();
-    },
-    
-    // Update trigger badge
-    updateTriggerBadge: function() {
-        const badge = document.getElementById('objectionBadge');
-        if (badge) {
-            badge.textContent = this.isOpen ? '✕' : this.getTotalObjectionCount();
+        if (body) {
+            body.style.display = this.isOpen ? 'block' : 'none';
         }
-        const trigger = document.getElementById('objectionTriggerBtn');
-        if (trigger) {
-            trigger.classList.toggle('open', this.isOpen);
+        
+        if (toggleBtn) {
+            toggleBtn.style.background = this.isOpen ? 'var(--success)' : 'var(--secondary)';
+            toggleBtn.innerHTML = this.isOpen ? '<i class="fas fa-shield-alt"></i> Hide' : '<i class="fas fa-shield-alt"></i> Objections';
+        }
+        
+        if (minimizeBtn) {
+            minimizeBtn.innerHTML = this.isOpen ? '<i class="fas fa-chevron-up"></i>' : '<i class="fas fa-chevron-down"></i>';
         }
     },
     
-    // Switch category
+    toggleMinimize: function() {
+        const body = document.getElementById('objectionIntegratedBody');
+        const minimizeBtn = document.getElementById('objectionMinimizeBtn');
+        
+        if (body) {
+            const isMinimized = body.style.display === 'none';
+            body.style.display = isMinimized ? 'block' : 'none';
+            if (minimizeBtn) {
+                minimizeBtn.innerHTML = isMinimized ? '<i class="fas fa-chevron-up"></i>' : '<i class="fas fa-chevron-down"></i>';
+            }
+        }
+    },
+    
     switchCategory: function(categoryKey) {
         this.currentCategory = categoryKey;
         
-        // Update nav buttons
-        document.querySelectorAll('.objection-nav-btn').forEach(btn => {
+        document.querySelectorAll('.objection-category-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.category === categoryKey);
         });
         
-        // Update cards
-        const container = document.getElementById('objectionSideCards');
+        const container = document.getElementById('objectionCardsContainer');
         if (container) {
             container.innerHTML = this.renderCards(categoryKey);
             this.attachCardEvents();
         }
-        
-        this.saveState();
     },
     
-    // Toggle card expansion
     toggleCard: function(id) {
         if (this.expandedCards.has(id)) {
             this.expandedCards.delete(id);
@@ -499,7 +307,6 @@ const ObjectionHandler = {
             this.expandedCards.add(id);
         }
         
-        // Update the specific card
         const card = document.querySelector(`.objection-card[data-id="${id}"]`);
         if (card) {
             card.classList.toggle('expanded');
@@ -512,11 +319,8 @@ const ObjectionHandler = {
                 toggle.className = `fas fa-chevron-${this.expandedCards.has(id) ? 'up' : 'down'}`;
             }
         }
-        
-        this.saveState();
     },
     
-    // Expand all cards
     expandAll: function() {
         const cards = document.querySelectorAll('.objection-card');
         cards.forEach(card => {
@@ -530,10 +334,8 @@ const ObjectionHandler = {
                 if (toggle) toggle.className = 'fas fa-chevron-up';
             }
         });
-        this.saveState();
     },
     
-    // Collapse all cards
     collapseAll: function() {
         const cards = document.querySelectorAll('.objection-card');
         cards.forEach(card => {
@@ -547,16 +349,13 @@ const ObjectionHandler = {
                 if (toggle) toggle.className = 'fas fa-chevron-down';
             }
         });
-        this.saveState();
     },
     
-    // Copy response to clipboard
     copyResponse: function(response) {
         const text = response.replace(/&quot;/g, '"');
         navigator.clipboard.writeText(text).then(() => {
             showToast('Response copied to clipboard! 📋', 'success');
         }).catch(() => {
-            // Fallback
             const ta = document.createElement('textarea');
             ta.value = text;
             document.body.appendChild(ta);
@@ -567,12 +366,10 @@ const ObjectionHandler = {
         });
     },
     
-    // Practice mode - open a practice modal
     practiceMode: function(objection, response) {
         const cleanObjection = objection.replace(/&quot;/g, '"');
         const cleanResponse = response.replace(/&quot;/g, '"');
         
-        // Create practice modal
         const existing = document.getElementById('objectionPracticeModal');
         if (existing) existing.remove();
         
@@ -613,11 +410,8 @@ const ObjectionHandler = {
         `;
         
         document.body.appendChild(modal);
-        
-        // Show modal with animation
         setTimeout(() => modal.classList.add('active'), 10);
         
-        // Close handler
         const closeBtn = document.getElementById('objectionPracticeClose');
         if (closeBtn) {
             closeBtn.addEventListener('click', () => {
@@ -626,7 +420,6 @@ const ObjectionHandler = {
             });
         }
         
-        // Click outside to close
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
                 modal.classList.remove('active');
@@ -634,7 +427,6 @@ const ObjectionHandler = {
             }
         });
         
-        // Reveal recommended response
         const revealBtn = document.getElementById('objectionRevealResponse');
         if (revealBtn) {
             revealBtn.addEventListener('click', () => {
@@ -648,7 +440,6 @@ const ObjectionHandler = {
             });
         }
         
-        // Copy button in practice modal
         const copyBtn = document.querySelector('.objection-practice-copy-btn');
         if (copyBtn) {
             copyBtn.addEventListener('click', () => {
@@ -658,77 +449,43 @@ const ObjectionHandler = {
         }
     },
     
-    // Attach all event listeners
     attachEvents: function() {
-        // Trigger button
-        const trigger = document.getElementById('objectionTriggerBtn');
-        if (trigger) {
-            trigger.addEventListener('click', (e) => {
+        const toggleBtn = document.getElementById('objectionToggleBtn');
+        if (toggleBtn) {
+            const newToggleBtn = toggleBtn.cloneNode(true);
+            toggleBtn.parentNode.replaceChild(newToggleBtn, toggleBtn);
+            newToggleBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.toggleBanner();
             });
         }
         
-        // Close button
-        const closeBtn = document.getElementById('objectionCloseBtn');
-        if (closeBtn) {
-            closeBtn.addEventListener('click', () => {
-                this.closeBanner();
+        const minimizeBtn = document.getElementById('objectionMinimizeBtn');
+        if (minimizeBtn) {
+            minimizeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleMinimize();
             });
         }
         
-        // Click outside to close
-        document.addEventListener('click', (e) => {
-            const banner = document.getElementById('objectionSideBanner');
-            const triggerBtn = document.getElementById('objectionTriggerBtn');
-            if (this.isOpen && banner && triggerBtn) {
-                if (!banner.contains(e.target) && !triggerBtn.contains(e.target)) {
-                    this.closeBanner();
-                }
-            }
-        });
-        
-        // ESC key to close
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && this.isOpen) {
-                this.closeBanner();
-            }
-        });
-        
-        // Category navigation
-        document.querySelectorAll('.objection-nav-btn').forEach(btn => {
+        document.querySelectorAll('.objection-category-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 this.switchCategory(btn.dataset.category);
             });
         });
         
-        // Expand all / Collapse all
-        const expandAll = document.getElementById('objectionSideExpandAll');
-        const collapseAll = document.getElementById('objectionSideCollapseAll');
+        const expandAll = document.getElementById('objectionExpandAll');
+        const collapseAll = document.getElementById('objectionCollapseAll');
         if (expandAll) expandAll.addEventListener('click', () => this.expandAll());
         if (collapseAll) collapseAll.addEventListener('click', () => this.collapseAll());
         
-        // Card events
         this.attachCardEvents();
         
-        // Restore state
-        if (this.isOpen) {
-            const banner = document.getElementById('objectionSideBanner');
-            const triggerBtn = document.getElementById('objectionTriggerBtn');
-            if (banner) {
-                banner.classList.add('open');
-                banner.setAttribute('aria-hidden', 'false');
-            }
-            if (triggerBtn) {
-                triggerBtn.classList.add('active', 'open');
-            }
-            document.body.classList.add('objection-banner-open');
-        }
+        const container = document.getElementById('objectionHandlerContainer');
+        if (container) container.style.display = 'none';
     },
     
-    // Attach card-specific events
     attachCardEvents: function() {
-        // Card header click to toggle
         document.querySelectorAll('.objection-card-header').forEach(header => {
             header.addEventListener('click', () => {
                 const id = header.dataset.id;
@@ -736,7 +493,6 @@ const ObjectionHandler = {
             });
         });
         
-        // Copy buttons
         document.querySelectorAll('.objection-copy-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -745,7 +501,6 @@ const ObjectionHandler = {
             });
         });
         
-        // Practice buttons
         document.querySelectorAll('.objection-practice-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -757,13 +512,13 @@ const ObjectionHandler = {
     }
 };
 
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    // Wait for the app to initialize
-    setTimeout(() => {
-        ObjectionHandler.init();
-    }, 800);
-});
-
-// Make globally accessible
 window.ObjectionHandler = ObjectionHandler;
+
+// Auto-initialize when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    if (document.getElementById('objectionHandlerContainer')) {
+        setTimeout(function() {
+            ObjectionHandler.init();
+        }, 500);
+    }
+});

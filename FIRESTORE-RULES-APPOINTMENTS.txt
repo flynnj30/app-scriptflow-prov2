@@ -1,0 +1,10 @@
+// MERGE this into the existing rules inside:
+// match /databases/{database}/documents {
+
+match /users/{userId}/appointments/{appointmentId} {
+  allow read, create, update, delete: if request.auth != null
+    && request.auth.uid == userId;
+}
+
+// Keep all existing rules for users, scripts, tasks, teamMembers, etc.
+// Do not replace the complete rules file with this snippet.

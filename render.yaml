@@ -1,8 +1,23 @@
 services:
   - type: web
-    name: app-scriptflow-pro
+    name: app-scriptflow-prov2
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
-    autoDeploy: true
+    autoDeployTrigger: commit
+    envVars:
+      - key: MAX_UPLOAD_MB
+        value: "500"
+      - key: WHISPER_DEFAULT_MODEL
+        value: "tiny"
+      - key: WHISPER_DEVICE
+        value: "cpu"
+      - key: WHISPER_COMPUTE_TYPE
+        value: "int8"
+      - key: WHISPER_CPU_THREADS
+        value: "2"
+      - key: MAX_CONCURRENT_TRANSCRIPTIONS
+        value: "1"
+      - key: TRANSCRIPTION_ALLOWED_ORIGINS
+        value: "*"

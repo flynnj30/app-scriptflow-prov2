@@ -1,0 +1,13 @@
+// MERGE these rules into your existing Firestore rules.
+// Do not replace unrelated existing rules.
+// Place inside: match /databases/{database}/documents { ... }
+
+match /users/{userId}/appointments/{appointmentId} {
+  allow read, create, update, delete: if request.auth != null
+    && request.auth.uid == userId;
+}
+
+match /users/{userId}/transcriptHistory/{historyId} {
+  allow read, create, update, delete: if request.auth != null
+    && request.auth.uid == userId;
+}

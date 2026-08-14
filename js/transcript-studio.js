@@ -1,11 +1,27 @@
-/* ScriptFlow Pro - Transcript Studio v4
- * Same-origin FastAPI + faster-whisper transcription.
- * Existing CRM/calendar data is untouched. Audio is sent only to ScriptFlow Pro's
- * own /transcribe endpoint; no browser-side model download, Puter SDK, or LLM API.
+/* ScriptFlow Pro - Conversation Notes / Transcript Studio
+ * FastAPI + Whisper speech-to-text + deterministic booking extraction.
+ * Existing CRM/calendar data is untouched. No LLM or cloud booking-analysis
+ * service is used. Booking fields are extracted conservatively
+ * from transcript-supported evidence and missing values remain Not specified.
  */
 (function () {
   'use strict';
-  const WHISPER_MODELS = { fast: 'tiny', balanced: 'base', accurate: 'small' };
+
+  // Workspace Whisper provider. The transcription engine is open-source
+  // and self-hostable: no Gemini, Puter, LLM, or per-minute API is required.
+  // For production, set window.SCRIPTFLOW_TRANSCRIPTION_API_URL to your FastAPI
+  // service URL. If omitted, the app uses the same-origin /transcribe endpoint.
+  // Production FastAPI endpoint. Keep the override so local/self-hosted deployments
+  // can point the studio at another service without changing this file.
+  const DEFAULT_TRANSCRIPTION_API_URL = 'https://app-scriptflow-prov2.onrender.com';
+  const TRANSCRIPTION_API_URL = String(
+    window.SCRIPTFLOW_TRANSCRIPTION_API_URL || DEFAULT_TRANSCRIPTION_API_URL
+  ).replace(/\/+$/, '');
+  const WORKSPACE_MODELS = {
+    fast: 'tiny',
+    balanced: 'base',
+    accurate: 'small'
+  };
   const LANGUAGES = [
     ['auto','Auto-detect'],['en','English'],['es','Spanish'],['fr','French'],['de','German'],['it','Italian'],
     ['pt','Portuguese'],['nl','Dutch'],['pl','Polish'],['tr','Turkish'],['ru','Russian'],['uk','Ukrainian'],
@@ -14,13 +30,14 @@
     ['fi','Finnish'],['cs','Czech'],['ro','Romanian'],['hu','Hungarian'],['el','Greek'],['he','Hebrew']
   ];
 
+
   const Studio = {
     state: {
       phase: 'upload', file: null, audioUrl: '', fileName: '', transcript: '', chunks: [],
       language: 'auto', translate: false, subtitles: true, speakerId: false,
-      summaryMode: 'off', model: 'fast', provider: 'local',
+      summaryMode: 'off', model: 'fast', provider: 'workspace-whisper', fastApiModel: WORKSPACE_MODELS.fast,
       busy: false, cancelRequested: false, audioDuration: 0, sourceType: '', lastSummary: '', selectedChunkIndex: 0,
-      initialized: false, uploadInputBound: false
+      initialized: false, uploadInputBound: false, historyLoaded: false, history: [], historyOpen: false, historyCloudDisabled: false, historyCloudChecked: false
     },
 
     init() {
@@ -28,7 +45,7 @@
       this.state.initialized = true;
       document.addEventListener('click', (e) => {
         const item = e.target.closest('[data-tool="transcript"]');
-        if (item && typeof FeaturePanel !== 'undefined') FeaturePanel.show('transcript', '🎙️ Transcript Studio');
+        if (item && typeof FeaturePanel !== 'undefined') FeaturePanel.show('transcript', '🎙️ Conversation Notes');
       });
     },
 
@@ -41,6 +58,9 @@
       this.state.transcript = '';
       this.state.chunks = [];
       this.state.sourceType = '';
+      this.state.aiBooking = null;
+      this.state.historyId = null;
+      this.state.historyCreatedAt = null;
       container.innerHTML = this.uploadView();
       this.bindUpload(container);
     },
@@ -50,8 +70,8 @@
       <div class="ts-pro">
         <div class="ts-upload-shell">
           <div class="ts-brand-mark"><i class="fas fa-waveform-lines"></i></div>
-          <div class="ts-pro-title">OPUS to Text Converter <span>Powered by AI</span></div>
-          <p class="ts-pro-subtitle">Turn your recording into searchable text quickly. Upload your file, choose your accuracy level, and review the result before exporting.</p>
+          <div class="ts-pro-title">Conversation Notes <span>Audio &amp; call notes</span></div>
+          <p class="ts-pro-subtitle">Turn a call recording into clean, searchable notes. Upload your recording, choose your preferred quality, and review the result before exporting.</p>
 
           <div class="ts-source-tabs" role="tablist">
             <button class="ts-source-tab active" data-source-tab="file"><i class="far fa-file-audio"></i> File upload</button>
@@ -65,7 +85,7 @@
               <h3>Click or drag &amp; drop to upload your file</h3>
               <p>OPUS, OGG, WAV, MP3, M4A, MP4, WebM, FLAC, TXT, SRT, VTT and CSV</p>
               <button class="ts-primary-btn" id="tsChooseFile"><i class="fas fa-upload"></i> Upload a file</button>
-              <small>Files are processed locally in your browser. Your audio is not uploaded to ScriptFlow.</small>
+              <small>Your recording is processed by your configured workspace service and is not sent to a third-party AI analysis tool.</small>
             </div>
           </div>
 
@@ -80,7 +100,7 @@
 
           <div class="ts-capability-row">
             <span><i class="fas fa-language"></i> 20+ languages</span>
-            <span><i class="fas fa-server"></i> Private ScriptFlow transcription</span>
+            <span><i class="fas fa-microchip"></i> Fast conversation processing</span>
             <span><i class="fas fa-file-export"></i> SRT / VTT / TXT / CSV</span>
           </div>
           <div class="ts-error" id="tsUploadError" hidden></div>
@@ -140,6 +160,7 @@
           this.state.transcript = this.cleanTranscript(String(reader.result || ''));
           this.state.chunks = this.state.transcript ? [{ start: 0, end: 0, text: this.state.transcript }] : [];
           this.state.phase = 'result';
+          this.saveTranscriptHistory();
           this.renderCurrent(container);
         };
         reader.readAsText(file);
@@ -175,11 +196,11 @@
           <div class="ts-option-row"><div><b><i class="fas fa-microphone-lines"></i> Audio language</b><small>Choose the language spoken in your audio. Auto-detect is recommended when unsure.</small></div><select id="tsLanguage">${LANGUAGES.map(([v,l]) => `<option value="${v}" ${this.state.language===v?'selected':''}>${l}</option>`).join('')}</select></div>
           <div class="ts-option-row"><div><b><i class="fas fa-language"></i> Translation</b><small>Translate the transcript to English after transcription.</small></div><label class="ts-switch"><input id="tsTranslate" type="checkbox" ${this.state.translate?'checked':''}><span></span></label></div>
           <div class="ts-option-row"><div><b><i class="fas fa-closed-captioning"></i> Generate subtitles</b><small>Create timestamped SRT and VTT files from detected speech segments.</small></div><label class="ts-switch"><input id="tsSubtitles" type="checkbox" ${this.state.subtitles?'checked':''}><span></span></label></div>
-          <div class="ts-option-row"><div><b><i class="fas fa-users"></i> Speaker labels</b><small>Prepare the transcript for editable Speaker 1 / Speaker 2 labels. Automatic diarization is not claimed as exact.</small></div><label class="ts-switch"><input id="tsSpeaker" type="checkbox" ${this.state.speakerId?'checked':''}><span></span></label></div>
-          <div class="ts-option-row"><div><b><i class="fas fa-wand-magic-sparkles"></i> AI summary</b><small>Generate a concise or detailed analysis from the completed transcript.</small></div><select id="tsSummaryMode"><option value="off">Off</option><option value="concise" ${this.state.summaryMode==='concise'?'selected':''}>Concise</option><option value="detailed" ${this.state.summaryMode==='detailed'?'selected':''}>Detailed</option></select></div>
-          <div class="ts-option-row"><div><b><i class="fas fa-microchip"></i> Transcription mode</b><small>Choose the local speech model. Fast is recommended for everyday recordings; Higher accuracy uses a larger model.</small></div><select id="tsModel"><option value="fast" ${this.state.model==='fast'?'selected':''}>Fast · Tiny</option><option value="balanced" ${this.state.model==='balanced'?'selected':''}>Balanced · Base</option><option value="accurate" ${this.state.model==='accurate'?'selected':''}>Higher accuracy · Small</option></select></div>
-          <div class="ts-engine-note"><i class="fas fa-shield-halved"></i><div><strong>ScriptFlow transcription service</strong><span>Your recording is processed by the ScriptFlow FastAPI service using faster-whisper. No Gemini, Puter, or client-side model download is required.</span></div></div>
-          <button class="ts-transcribe-btn" id="tsTranscribe"><span class="ts-btn-content"><i class="fas fa-wand-magic-sparkles"></i> Create Transcript</span><span class="ts-btn-progress" aria-hidden="true"><span class="ts-progress-fill"></span></span><span class="ts-btn-percent">0%</span></button>
+          <div class="ts-option-row"><div><b><i class="fas fa-users"></i> Speaker labels</b><small>Add editable Speaker 1 / Speaker 2 labels to transcript segments after transcription. Workspace Whisper does not perform automatic speaker identification.</small></div><label class="ts-switch"><input id="tsSpeaker" type="checkbox" ${this.state.speakerId?'checked':''}><span></span></label></div>
+          <div class="ts-option-row"><div><b><i class="fas fa-list-check"></i> Auto summary</b><small>Generate a concise or detailed rule-based summary from the completed transcript.</small></div><select id="tsSummaryMode"><option value="off">Off</option><option value="concise" ${this.state.summaryMode==='concise'?'selected':''}>Concise</option><option value="detailed" ${this.state.summaryMode==='detailed'?'selected':''}>Detailed</option></select></div>
+          <div class="ts-option-row"><div><b><i class="fas fa-microchip"></i> Transcription model</b><small>Runs on your workspace service with open-source Whisper. Choose speed or accuracy; no commercial transcription API credits are required.</small></div><select id="tsModel"><option value="fast" ${this.state.model==='fast'?'selected':''}>Fast · Whisper Tiny</option><option value="balanced" ${this.state.model==='balanced'?'selected':''}>Balanced · Whisper Base</option><option value="accurate" ${this.state.model==='accurate'?'selected':''}>Higher accuracy · Whisper Small</option></select></div>
+          <div class="ts-engine-note"><i class="fas fa-shield-halved"></i><div><strong>Runs on your workspace service</strong><span>Whisper handles speech-to-text on your configured server. Booking extraction uses deterministic rules only—no LLM, Gemini, Puter, or AI booking-analysis service.</span></div></div>
+          <button class="ts-transcribe-btn" id="tsTranscribe"><span class="ts-btn-content"><i class="fas fa-wand-magic-sparkles"></i> Create Notes</span><span class="ts-btn-progress" aria-hidden="true"><span class="ts-progress-fill"></span></span><span class="ts-btn-percent">0%</span></button>
           <div class="ts-transcribe-status" id="tsTranscribeStatus">Ready when you are.</div>
           <div class="ts-error" id="tsConfigError" hidden></div>
         </div>
@@ -216,141 +237,64 @@
       const errorBox = container.querySelector('#tsConfigError');
       if (errorBox) { errorBox.hidden = true; errorBox.textContent = ''; }
       if (!btn || !content || !percent || !fill) { this.state.busy = false; return; }
-
-      btn.disabled = true;
-      btn.classList.add('loading');
-      let progress = 4;
-      let ticker = null;
-      const setProgress = (value, text) => {
-        const n = Math.max(0, Math.min(100, Math.round(value)));
-        fill.style.width = `${n}%`;
-        percent.textContent = `${n}%`;
-        if (status) status.textContent = text || 'Processing…';
-      };
-
+      btn.disabled = true; btn.classList.add('loading');
+      content.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading recording…';
+      const setProgress = (value, text) => { const n=Math.max(0,Math.min(100,Math.round(value))); fill.style.width=`${n}%`; percent.textContent=`${n}%`; if(status)status.textContent=text||'Processing…'; };
       try {
-        setProgress(8, 'Preparing your recording…');
-        const form = new FormData();
-        form.append('file', this.state.file, this.state.fileName || 'recording.opus');
-        form.append('model', WHISPER_MODELS[this.state.model] || WHISPER_MODELS.fast);
-        form.append('language', this.state.language || 'auto');
-        form.append('translate', this.state.translate ? 'true' : 'false');
-        form.append('include_timestamps', 'true');
-
-        content.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating transcript…';
-        setProgress(15, 'Uploading securely…');
-        ticker = setInterval(() => {
-          progress = Math.min(88, progress + (progress < 45 ? 2 : 0.6));
-          setProgress(progress, progress < 45 ? 'Transcribing audio…' : 'Formatting transcript…');
-        }, 900);
-
-        const response = await fetch(this.apiUrl('/transcribe'), {
-          method: 'POST',
-          body: form,
-          credentials: 'same-origin',
-          cache: 'no-store'
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(payload.detail || `Transcription service returned HTTP ${response.status}.`);
-        }
-        if (!payload.text) throw new Error('No speech was detected. Try a clearer recording or another transcription mode.');
-
-        if (ticker) clearInterval(ticker);
-        ticker = null;
-        setProgress(92, 'Organizing transcript and timestamps…');
-        this.applyTranscriptionResult(payload);
-        this.state.audioDuration = Number(payload.duration) || this.state.audioDuration || await this.readAudioDuration(this.state.audioUrl);
-        setProgress(97, 'Finalizing transcript…');
-        this.state.phase = 'result';
-        setProgress(100, 'Transcription complete.');
-        setTimeout(() => this.renderCurrent(container), 250);
-      } catch (err) {
-        if (ticker) clearInterval(ticker);
-        ticker = null;
-        console.error('Transcript Studio processing error:', err);
-        const message = this.friendlyError(err);
-        if (errorBox) { errorBox.hidden = false; errorBox.textContent = message; }
-        content.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Create Transcript';
-        btn.disabled = false;
-        btn.classList.remove('loading');
-        setProgress(0, 'Ready to retry.');
-      } finally {
-        if (ticker) clearInterval(ticker);
-        this.state.busy = false;
-      }
+        setProgress(2,'Connecting to the workspace service…');
+        await this.checkTranscriptionApi();
+        setProgress(8,'Uploading recording…');
+        const form=new FormData();
+        form.append('file',this.state.file,this.state.file.name||'audio');
+        form.append('format','json'); form.append('keep_wav','false');
+        form.append('model',WORKSPACE_MODELS[this.state.model]||WORKSPACE_MODELS.fast);
+        form.append('translate',this.state.translate?'true':'false');
+        if(this.state.language!=='auto')form.append('language',this.state.language);
+        form.append('word_timestamps','false');
+        form.append('include_timestamps','true');
+        const result=await this.uploadTranscription(form,(loaded,total)=>{const p=total?(loaded/total)*100:0;setProgress(8+p*0.42,`Uploading recording… ${Math.round(p)}%`);},message=>{setProgress(50,message||'Creating notes…');content.innerHTML='<i class="fas fa-microphone-lines fa-beat-fade"></i> Transcribing…';});
+        setProgress(94,'Preparing your notes…');
+        this.applyFastApiResult(result);
+        if(!this.state.transcript)throw new Error('The transcription service returned no speech text.');
+        setProgress(99,'Finalizing and saving…');
+        await this.saveTranscriptHistory();
+        this.state.phase='result'; setProgress(100,'Notes ready.');
+        setTimeout(()=>this.renderCurrent(container),250);
+      }catch(err){
+        console.error('Transcript Studio workspace processing error:',err);
+        const message=this.friendlyTranscriptionError(err);
+        if(errorBox){errorBox.hidden=false;errorBox.textContent=message;}
+        content.innerHTML='<i class="fas fa-wand-magic-sparkles"></i> Create Notes'; btn.disabled=false;btn.classList.remove('loading');setProgress(0,'Ready to retry.');
+      }finally{this.state.cancelRequested=false;this.state.busy=false;}
     },
 
-    apiUrl(path) {
-      const configured = String(window.SCRIPTFLOW_TRANSCRIPTION_API || '').trim().replace(/\/$/, '');
-      if (configured) return `${configured}${path}`;
-      return path;
+    transcriptionApiUrl(){ return `${TRANSCRIPTION_API_URL}/transcribe`; },
+    transcriptionHealthUrl(){ return `${TRANSCRIPTION_API_URL}/health`; },
+    async checkTranscriptionApi(){
+      const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),8000);
+      try{const response=await fetch(this.transcriptionHealthUrl(),{method:'GET',headers:{Accept:'application/json'},signal:controller.signal,cache:'no-store'});if(!response.ok)throw new Error(`Transcription service returned HTTP ${response.status}.`);const data=await response.json().catch(()=>({}));if(data.status&&data.status!=='ok')throw new Error('The transcription service is not ready.');return data;}finally{clearTimeout(timeout);}
     },
-
-    applyTranscriptionResult(output) {
-      const result = typeof output === 'string' ? { text: output } : (output || {});
-      const segments = Array.isArray(result.segments) ? result.segments : [];
-      const words = Array.isArray(result.words) ? result.words : [];
-      const rawText = String(result.text || '').trim();
-
-      let chunks = segments.map((segment, index) => {
-        const start = this.segmentStart(segment);
-        const end = this.segmentEnd(segment, start, segments[index + 1]);
-        let text = String(segment.text || segment.transcript || '').trim();
-        const speaker = segment.speaker || segment.speaker_id || '';
-        if (speaker && this.state.speakerId && text && !/^speaker\s*\d+\s*:/i.test(text)) {
-          text = `${speaker}: ${text}`;
-        }
-        return { start, end, text };
-      }).filter(x => x.text);
-
-      if (!chunks.length && words.length) {
-        chunks = this.chunksFromWords(words);
-      }
-
-      // Some high-accuracy transcription service responses return text without timestamp
-      // segments. Preserve the complete transcript and split it into readable
-      // chunks rather than inventing fake per-word timings.
-      if (!chunks.length && rawText) {
-        chunks = this.chunksFromText(rawText, this.state.audioDuration);
-      }
-
-      this.state.transcript = rawText || chunks.map(x => x.text.replace(/^Speaker[^:]*:\s*/i, '')).join(' ').trim();
-      this.state.chunks = chunks;
+    uploadTranscription(formData,onUploadProgress,onProcessing){
+      return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('POST',this.transcriptionApiUrl(),true);xhr.responseType='json';xhr.setRequestHeader('Accept','application/json');xhr.timeout=30*60*1000;
+        xhr.upload.onprogress=e=>{if(e.lengthComputable)onUploadProgress?.(e.loaded,e.total);};
+        xhr.upload.onloadend=()=>onProcessing?.('Your recording is being processed…');
+        xhr.onload=()=>{let payload=xhr.response;if(!payload&&xhr.responseText){try{payload=JSON.parse(xhr.responseText);}catch(_){payload={detail:xhr.responseText};}}if(xhr.status>=200&&xhr.status<300)return resolve(payload||{});reject(new Error(String(payload?.detail||payload?.message||`HTTP ${xhr.status}`)));};
+        xhr.onerror=()=>reject(new Error('Network error while contacting the workspace processing service.'));xhr.ontimeout=()=>reject(new Error('The transcription service timed out. Try the Fast model or a shorter recording.'));xhr.onabort=()=>reject(new Error('Transcription was cancelled.'));xhr.send(formData);});
     },
-
-    segmentStart(segment) {
-      const value = segment && (segment.start ?? segment.start_time ?? (Array.isArray(segment.timestamp) ? segment.timestamp[0] : undefined));
-      return Number.isFinite(Number(value)) ? Number(value) : 0;
+    applyFastApiResult(result){
+      const segments=Array.isArray(result?.segments)?result.segments:[]; const text=this.cleanTranscript(String(result?.text||'').trim());
+      if(segments.length){this.state.chunks=segments.map(segment=>({start:Number(segment.start)||0,end:Math.max(Number(segment.end)||0,Number(segment.start)||0),text:this.cleanTranscript(String(segment.text||'').trim())})).filter(segment=>segment.text);this.state.transcript=this.state.chunks.map(segment=>segment.text).join(' ').replace(/\s+/g,' ').trim();}
+      else{this.state.transcript=text;this.state.chunks=this.chunksFromText(text,Number(result?.duration)||this.state.audioDuration||0);}
+      if(Number.isFinite(Number(result?.duration)))this.state.audioDuration=Number(result.duration);this.state.sourceType='audio';
     },
-
-    segmentEnd(segment, start, next) {
-      const value = segment && (segment.end ?? segment.end_time ?? (Array.isArray(segment.timestamp) ? segment.timestamp[1] : undefined));
-      if (Number.isFinite(Number(value))) return Number(value);
-      if (next) return this.segmentStart(next);
-      return start;
-    },
-
-    chunksFromWords(words) {
-      const chunks = [];
-      let bucket = null;
-      words.forEach(word => {
-        const text = String(word.text || '').trim();
-        if (!text) return;
-        const start = Number(word.start) || 0;
-        const end = Number(word.end) || start;
-        if (!bucket) bucket = { start, end, text };
-        else {
-          bucket.end = end;
-          bucket.text += `${bucket.text.endsWith(' ') ? '' : ' '}${text}`;
-        }
-        if (bucket.text.length >= 110 || /[.!?]$/.test(text)) {
-          chunks.push(bucket);
-          bucket = null;
-        }
-      });
-      if (bucket) chunks.push(bucket);
-      return chunks;
+    friendlyTranscriptionError(error){
+      const message=String(error?.message||error||'Transcription failed.');
+      if(/404|failed to fetch|network|connection|cors/i.test(message))return 'The Workspace service could not be reached. Check that the API is running and that its URL is configured correctly.';
+      if(/413|too large|request entity/i.test(message))return 'This recording is larger than the server upload limit. Increase MAX_UPLOAD_MB or use a shorter recording.';
+      if(/503|model|loading|not ready/i.test(message))return 'The processing model is still loading or unavailable. Wait a moment and retry.';
+      if(/timeout|timed out/i.test(message))return 'The recording took too long to process. Try the Fast option or a shorter recording.';
+      if(/decode|codec|format|opus|ogg/i.test(message))return 'The workspace server could not decode this recording. Try OGG/Opus, WAV, MP3, or M4A.';
+      return `Workspace processing failed: ${message}`;
     },
 
     chunksFromText(text, duration) {
@@ -365,16 +309,7 @@
       }));
     },
 
-    async readAudioDuration(url) {
-      if (!url) return 0;
-      return new Promise(resolve => {
-        const audio = new Audio();
-        audio.preload = 'metadata';
-        audio.onloadedmetadata = () => resolve(Number(audio.duration) || 0);
-        audio.onerror = () => resolve(0);
-        audio.src = url;
-      });
-    },
+
 
 
     // ------------------------------------------------------------
@@ -581,7 +516,7 @@
       const duration = this.state.audioDuration || (this.state.chunks.length ? this.state.chunks[this.state.chunks.length - 1].end : 0);
       return `
       <div class="ts-pro ts-result-page">
-        <div class="ts-result-topbar"><button class="ts-back-btn" id="tsBack"><i class="fas fa-chevron-left"></i></button><div class="ts-result-title"><strong>${this.esc(title)}</strong><span>${this.state.sourceType === 'audio' ? this.formatDuration(duration) : 'Transcript file'}</span></div><div class="ts-result-actions"><button class="ts-icon-btn" id="tsShare" title="Share"><i class="fas fa-share-nodes"></i></button><button class="ts-icon-btn" id="tsMore" title="More"><i class="fas fa-ellipsis"></i></button><button class="ts-export-main" id="tsExportMenu"><i class="fas fa-download"></i> Export</button></div></div><div class="ts-booking-card" id="tsBookingCard"><div class="ts-booking-head"><div><span class="ts-booking-kicker"><i class="fas fa-calendar-check"></i> Booking-ready details</span><h3>Appointment Submission Format</h3><p>Auto-filled from the transcript. Missing details are marked <b>Not specified</b>.</p></div><div class="ts-booking-actions"><button class="ts-mini-btn" id="tsCopyBooking"><i class="far fa-copy"></i> Copy</button><button class="ts-mini-btn" id="tsSendBooking"><i class="fas fa-wand-magic-sparkles"></i> Send to Smart Import</button></div></div><textarea id="tsBookingText" class="ts-booking-text" spellcheck="false">${this.esc(this.bookingFormat(this.extractBookingData(this.state.transcript)))}</textarea></div>
+        <div class="ts-result-topbar"><button class="ts-back-btn" id="tsBack"><i class="fas fa-chevron-left"></i></button><div class="ts-result-title"><strong>${this.esc(title)}</strong><button class="ts-history-name" id="tsHistoryName" title="Open transcript history"><i class="fas fa-clock-rotate-left"></i> ${this.esc(this.getCurrentContactName())}</button><span>${this.state.sourceType === 'audio' ? this.formatDuration(duration) : 'Transcript file'}</span></div><div class="ts-result-actions"><button class="ts-icon-btn" id="tsShare" title="Share"><i class="fas fa-share-nodes"></i></button><button class="ts-icon-btn" id="tsMore" title="More"><i class="fas fa-ellipsis"></i></button><button class="ts-export-main" id="tsExportMenu"><i class="fas fa-download"></i> Export</button></div></div><div class="ts-booking-card" id="tsBookingCard"><div class="ts-booking-head"><div><span class="ts-booking-kicker"><i class="fas fa-calendar-check"></i> Booking-ready details</span><h3>Appointment Details</h3><p>Auto-filled from the transcript. Missing details are marked <b>Not specified</b>.</p></div><div class="ts-booking-actions"><button class="ts-mini-btn ts-ai-booking-btn" id="tsAnalyzeBooking" title="Build booking details from the conversation"><i class="fas fa-list-check"></i> <span>Build Booking Details</span></button><button class="ts-mini-btn" id="tsCopyBooking"><i class="far fa-copy"></i> Copy</button><button class="ts-mini-btn" id="tsSendBooking"><i class="fas fa-file-import"></i> Send to Smart Import</button></div></div><textarea id="tsBookingText" class="ts-booking-text" spellcheck="false">${this.esc(this.bookingFormat(this.extractBookingData(this.state.transcript)))}</textarea></div>
         <div class="ts-result-layout">
           <section class="ts-transcript-pane">
             <div class="ts-transcript-toolbar"><div class="ts-transcript-label"><strong>Transcript</strong><span>${this.formatDuration(duration)}</span></div><label class="ts-search"><i class="fas fa-search"></i><input id="tsSearch" placeholder="Search transcript" /></label><button class="ts-icon-btn" id="tsCopy" title="Copy"><i class="far fa-copy"></i></button><button class="ts-icon-btn" id="tsTranslateQuick" title="Translate to English"><i class="fas fa-language"></i></button></div>
@@ -594,6 +529,7 @@
             <div id="tsAnalysisBody">${this.summaryPanel(summary)}</div>
           </aside>
         </div>
+        <div class="ts-history-drawer" id="tsHistoryDrawer" hidden><div class="ts-history-head"><div><strong>Transcript History</strong><span>Saved transcripts for your account</span></div><button id="tsCloseHistory" class="ts-icon-btn" title="Close"><i class="fas fa-xmark"></i></button></div><div id="tsHistoryList" class="ts-history-list"><div class="ts-history-loading"><i class="fas fa-spinner fa-spin"></i> Loading history…</div></div></div>
         <div class="ts-export-drawer" id="tsExportDrawer" hidden><div><strong>Export transcript</strong><button id="tsCloseExport" class="ts-icon-btn"><i class="fas fa-xmark"></i></button></div><div class="ts-export-grid"><button data-export="txt">TXT</button><button data-export="srt">SRT</button><button data-export="vtt">VTT</button><button data-export="csv">CSV</button><button data-export="doc">Word</button><button data-export="pdf">PDF / Print</button></div></div>
         <audio id="tsAudio" preload="metadata" src="${this.esc(this.state.audioUrl)}"></audio>
       </div>`;
@@ -625,10 +561,13 @@
       container.querySelectorAll('.ts-chunk').forEach(el=>el.onclick=()=>{this.state.selectedChunkIndex=Number(el.dataset.index||0);audio.currentTime=Number(el.dataset.start||0);audio.play();if(play)play.innerHTML='<i class="fas fa-pause"></i>';});
       const search=container.querySelector('#tsSearch'); if(search) search.oninput=()=>this.filterChunks(container,search.value);
       container.querySelector('#tsCopy').onclick=()=>this.copyText(this.state.transcript);
+      const analyzeBooking=container.querySelector('#tsAnalyzeBooking'); if(analyzeBooking) analyzeBooking.onclick=()=>this.analyzeBooking(container, analyzeBooking);
       const bookingCopy=container.querySelector('#tsCopyBooking'); if(bookingCopy) bookingCopy.onclick=()=>this.copyText(container.querySelector('#tsBookingText')?.value||'');
       const bookingSend=container.querySelector('#tsSendBooking'); if(bookingSend) bookingSend.onclick=()=>this.sendBookingToSmartImport(container);
       container.querySelector('#tsBack').onclick=()=>{this.revokeUrl();this.state.phase='upload';this.renderCurrent(container);};
       container.querySelector('#tsShare').onclick=()=>this.shareTranscript();
+      const historyName=container.querySelector('#tsHistoryName'); if(historyName) historyName.onclick=()=>this.openHistory(container);
+      const closeHistory=container.querySelector('#tsCloseHistory'); if(closeHistory) closeHistory.onclick=()=>this.closeHistory(container);
       container.querySelector('#tsTranslateQuick').onclick=()=>this.quickTranslate(container);
       const add=container.querySelector('#tsAddSpeaker'); if(add)add.onclick=()=>this.addSpeakerLabel(container);
       container.querySelectorAll('[data-analysis]').forEach(tab=>tab.onclick=()=>this.renderAnalysisTab(container,tab.dataset.analysis));
@@ -638,6 +577,71 @@
       container.querySelector('#tsMore').onclick=()=>this.moreMenu(container);
       const regen=container.querySelector('#tsRegenerate'); if(regen) regen.onclick=()=>this.renderAnalysisTab(container,'summary');
       const mapExport=container.querySelector('#tsExportMap'); if(mapExport) mapExport.onclick=()=>this.exportMindMap();
+    },
+
+    async analyzeBooking(container, button) {
+      const transcript = String(this.state.transcript || '').trim();
+      const output = container.querySelector('#tsBookingText');
+      if (!transcript) {
+        if (typeof showToast === 'function') showToast('There is no transcript to analyze yet.', 'warning');
+        return;
+      }
+      if (!output || button?.dataset.busy === 'true') return;
+
+      const originalHtml = button.innerHTML;
+      button.dataset.busy = 'true';
+      button.disabled = true;
+      button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>Extracting…</span>';
+      output.classList.add('ts-ai-processing');
+
+      const setStatus = (message) => {
+        const card = container.querySelector('#tsBookingCard');
+        if (!card) return;
+        let status = card.querySelector('.ts-ai-status');
+        if (!status) {
+          status = document.createElement('div');
+          status.className = 'ts-ai-status';
+          const head = card.querySelector('.ts-booking-head');
+          if (head) head.appendChild(status);
+        }
+        status.innerHTML = `<i class="fas fa-list-check"></i> ${this.esc(message)}`;
+      };
+
+      try {
+        setStatus('Checking the conversation for appointment details…');
+        // Deterministic extraction only. No LLM is loaded and no transcript is sent
+        // to a cloud analysis provider. Multiple conservative passes reduce false
+        // positives while preserving the exact transcript-supported values.
+        const data = this.extractBookingData(transcript);
+        const confidence = this.bookingConfidence(data, transcript);
+        this.state.aiBooking = data;
+        output.value = this.bookingFormat(data);
+        output.dispatchEvent(new Event('input', { bubbles: true }));
+        await this.saveTranscriptHistory(data);
+        const nameButton = container.querySelector('#tsHistoryName');
+        if (nameButton) nameButton.innerHTML = `<i class="fas fa-clock-rotate-left"></i> ${this.esc(data.name || 'Not specified')}`;
+        setStatus(`Complete. ${confidence.label} extraction — review before sending to Smart Import.`);
+        if (typeof showToast === 'function') showToast(`Appointment details prepared from the conversation (${confidence.label.toLowerCase()} confidence).`, 'success');
+      } catch (error) {
+        console.error('Deterministic booking extraction failed:', error);
+        setStatus('Automatic extraction could not be completed. The original transcript-based output is still available.');
+        if (typeof showToast === 'function') showToast('The transcript could not be analyzed. Your original booking output is still available.', 'warning');
+      } finally {
+        output.classList.remove('ts-ai-processing');
+        button.dataset.busy = 'false';
+        button.disabled = false;
+        button.innerHTML = originalHtml;
+      }
+    },
+
+    bookingConfidence(data, transcript) {
+      const NOT = 'Not specified';
+      const fields = [data.business, data.name, data.role, data.phone, data.dateTime, data.email];
+      const found = fields.filter(v => v && v !== NOT).length;
+      const text = String(transcript || '');
+      const explicitLabels = (text.match(/\b(?:business name|company name|name|role|phone|email|demo time|demo date|meeting|appointment)\b/gi) || []).length;
+      const score = Math.min(100, Math.round((found / fields.length) * 85 + Math.min(explicitLabels, 6) * 2.5));
+      return { score, label: score >= 75 ? 'High' : score >= 45 ? 'Medium' : 'Low' };
     },
 
     sendBookingToSmartImport(container) {
@@ -652,6 +656,158 @@
 
       this.copyText(text);
       if (typeof showToast === 'function') showToast('Booking format copied. Paste it into Smart Import.', 'info');
+    },
+
+    getCurrentContactName() {
+      const ai = this.state.aiBooking;
+      if (ai && ai.name && ai.name !== 'Not specified') return ai.name;
+      const data = this.extractBookingData(this.state.transcript);
+      return data.name && data.name !== 'Not specified' ? data.name : 'Transcript History';
+    },
+
+    historyKey() {
+      const user = (typeof AppState !== 'undefined' ? AppState.currentUser : null) || null;
+      const id = user?.uid || user?.email || 'offline';
+      return `scriptflow_transcript_history_${String(id).replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
+    },
+
+    async saveTranscriptHistory(bookingOverride = null) {
+      const transcript = String(this.state.transcript || '').trim();
+      if (!transcript) return;
+      const fallback = this.extractBookingData(transcript);
+      const booking = bookingOverride || this.state.aiBooking || fallback;
+      const id = this.state.historyId || `th_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+      this.state.historyId = id;
+      const now = new Date().toISOString();
+      const record = {
+        id,
+        name: booking.name || fallback.name || 'Not specified',
+        business: booking.business || fallback.business || 'Not specified',
+        role: booking.role || fallback.role || 'Not specified',
+        phone: booking.phone || fallback.phone || 'Not specified',
+        email: booking.email || fallback.email || 'Not specified',
+        dateTime: booking.dateTime || fallback.dateTime || 'Not specified',
+        bookingText: this.bookingFormat(booking.business ? booking : fallback),
+        transcript,
+        chunks: Array.isArray(this.state.chunks) ? this.state.chunks.map(c => ({ start: Number(c.start)||0, end: Number(c.end)||0, text: String(c.text||'') })) : [],
+        fileName: this.state.fileName || 'Transcript',
+        sourceType: 'text',
+        createdAt: this.state.historyCreatedAt || now,
+        updatedAt: now
+      };
+      this.state.historyCreatedAt = record.createdAt;
+
+      // Fast local history so the user can reopen it even when Firestore is unavailable.
+      try {
+        const existing = JSON.parse(localStorage.getItem(this.historyKey()) || '[]');
+        const index = existing.findIndex(x => x.id === id);
+        if (index >= 0) existing[index] = record; else existing.unshift(record);
+        localStorage.setItem(this.historyKey(), JSON.stringify(existing.slice(0, 100)));
+        this.state.history = existing.slice(0, 100);
+      } catch (_) {}
+
+      // Sync once per signed-in user. If Firestore denies this collection, permanently
+      // fall back to local history for this session instead of retrying every transcript.
+      if (!this.state.historyCloudDisabled) {
+        try {
+          const user = (typeof AppState !== 'undefined' ? AppState.currentUser : null);
+          if (user && typeof firebase !== 'undefined' && firebase.firestore) {
+            await firebase.firestore().collection('users').doc(user.uid).collection('transcriptHistory').doc(id).set(record, { merge: true });
+            this.state.historyCloudChecked = true;
+          }
+        } catch (error) {
+          const code = String(error?.code || '').toLowerCase();
+          if (code.includes('permission-denied') || /missing or insufficient permissions/i.test(String(error?.message || ''))) {
+            this.state.historyCloudDisabled = true;
+            this.state.historyCloudChecked = true;
+            // Local history remains the authoritative fallback until Firestore rules are fixed.
+          } else {
+            // Network/extension blocking is non-fatal; don't spam the console.
+          }
+        }
+      }
+    },
+
+    async loadTranscriptHistory() {
+      const local = (() => { try { return JSON.parse(localStorage.getItem(this.historyKey()) || '[]'); } catch (_) { return []; } })();
+      this.state.history = Array.isArray(local) ? local : [];
+      if (!this.state.historyCloudDisabled) {
+        try {
+          const user = (typeof AppState !== 'undefined' ? AppState.currentUser : null);
+          if (user && typeof firebase !== 'undefined' && firebase.firestore) {
+            const snap = await firebase.firestore().collection('users').doc(user.uid).collection('transcriptHistory').orderBy('updatedAt', 'desc').limit(100).get();
+            const cloud = [];
+            snap.forEach(doc => cloud.push({ ...doc.data(), id: doc.id }));
+            const merged = [...cloud, ...this.state.history];
+            const byId = new Map(merged.map(item => [item.id, item]));
+            this.state.history = Array.from(byId.values()).sort((a,b) => String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))).slice(0,100);
+            localStorage.setItem(this.historyKey(), JSON.stringify(this.state.history));
+          }
+        } catch (error) {
+          const code = String(error?.code || '').toLowerCase();
+          if (code.includes('permission-denied') || /missing or insufficient permissions/i.test(String(error?.message || ''))) {
+            this.state.historyCloudDisabled = true;
+          }
+          // Keep history usable locally without emitting noisy Firestore warnings.
+        }
+      }
+      this.state.historyLoaded = true;
+      return this.state.history;
+    },
+
+    async openHistory(container) {
+      const drawer = container.querySelector('#tsHistoryDrawer');
+      if (!drawer) return;
+      drawer.hidden = false;
+      drawer.classList.add('open');
+      const list = drawer.querySelector('#tsHistoryList');
+      if (list) list.innerHTML = '<div class="ts-history-loading"><i class="fas fa-spinner fa-spin"></i> Loading history…</div>';
+      const history = await this.loadTranscriptHistory();
+      if (!history.length) {
+        if (list) list.innerHTML = '<div class="ts-history-empty"><i class="fas fa-clock-rotate-left"></i><strong>No transcript history yet</strong><span>Your completed transcripts will appear here automatically.</span></div>';
+        return;
+      }
+      if (list) list.innerHTML = history.map(item => `
+        <button class="ts-history-item ${item.id === this.state.historyId ? 'active' : ''}" data-history-id="${this.esc(item.id)}">
+          <span class="ts-history-avatar"><i class="fas fa-user"></i></span>
+          <span class="ts-history-meta"><strong>${this.esc(item.name || 'Not specified')}</strong><span>${this.esc(item.business || 'Not specified')}</span><small>${this.esc(item.dateTime || this.formatHistoryDate(item.updatedAt))}</small></span>
+          <i class="fas fa-chevron-right"></i>
+        </button>`).join('');
+      list?.querySelectorAll('[data-history-id]').forEach(btn => btn.onclick = () => this.loadHistoryRecord(btn.dataset.historyId, container));
+    },
+
+    closeHistory(container) {
+      const drawer = container.querySelector('#tsHistoryDrawer');
+      if (drawer) { drawer.hidden = true; drawer.classList.remove('open'); }
+    },
+
+    formatHistoryDate(value) {
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? 'Saved transcript' : d.toLocaleString([], { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
+    },
+
+    async loadHistoryRecord(id, container) {
+      const history = await this.loadTranscriptHistory();
+      const record = history.find(x => x.id === id);
+      if (!record) return;
+      this.revokeUrl();
+      this.state.historyId = record.id;
+      this.state.historyCreatedAt = record.createdAt;
+      this.state.fileName = record.fileName || 'Transcript';
+      this.state.file = null;
+      this.state.audioUrl = '';
+      this.state.sourceType = 'text';
+      this.state.transcript = String(record.transcript || '');
+      this.state.chunks = Array.isArray(record.chunks) && record.chunks.length ? record.chunks : this.chunksFromText(this.state.transcript, 0);
+      this.state.aiBooking = {
+        business: record.business || 'Not specified', name: record.name || 'Not specified', role: record.role || 'Not specified',
+        phone: record.phone || 'Not specified', email: record.email || 'Not specified', dateTime: record.dateTime || 'Not specified',
+        notes: 'Attendees: Not specified\nCurrent setup: Not specified\nWebsite goal: Not specified\nWhat to show: Not specified\nInterest and attitude: Not specified\nObjection/Concern: Not specified\nMeeting angle: Not specified'
+      };
+      this.state.phase = 'result';
+      this.closeHistory(container);
+      this.renderCurrent(container);
+      if (typeof showToast === 'function') showToast(`Loaded transcript for ${record.name || 'Not specified'}.`, 'success');
     },
 
     renderAnalysisTab(container, tab) {
@@ -707,25 +863,9 @@
       this.bindResult(container);
     },
     async quickTranslate(container){
-      if(!this.state.transcript)return;
-      if(this.state.sourceType!=='audio' || !this.state.file){if(typeof showToast==='function')showToast('Translation requires the original audio file.','info');return;}
-      const button=container.querySelector('#tsTranslateQuick'); if(!button)return;
-      button.disabled=true;button.classList.add('loading');button.innerHTML='<i class="fas fa-spinner fa-spin"></i>';
-      try{
-        const form=new FormData();
-        form.append('file',this.state.file,this.state.fileName||'recording.opus');
-        form.append('model',WHISPER_MODELS[this.state.model]||WHISPER_MODELS.fast);
-        form.append('language',this.state.language||'auto');
-        form.append('translate','true');
-        form.append('include_timestamps','true');
-        const response=await fetch(this.apiUrl('/transcribe'),{method:'POST',body:form,credentials:'same-origin',cache:'no-store'});
-        const payload=await response.json().catch(()=>({}));
-        if(!response.ok)throw new Error(payload.detail||`Translation service returned HTTP ${response.status}.`);
-        this.applyTranscriptionResult(payload); this.state.translate=true;
-        container.innerHTML=this.resultView(); this.bindResult(container);
-        if(typeof showToast==='function')showToast('English translation generated.','success');
-      }catch(err){if(typeof showToast==='function')showToast(this.friendlyError(err),'error');}
-      finally{button.disabled=false;button.classList.remove('loading');}
+      if(!this.state.transcript||!this.state.file){if(typeof showToast==='function')showToast('Translation requires the original audio file.','info');return;}
+      const button=container.querySelector('#tsTranslateQuick');if(!button)return;button.disabled=true;button.classList.add('loading');button.innerHTML='<i class="fas fa-spinner fa-spin"></i>';
+      try{const form=new FormData();form.append('file',this.state.file,this.state.file.name||'audio');form.append('format','json');form.append('keep_wav','false');form.append('model',WORKSPACE_MODELS[this.state.model]||WORKSPACE_MODELS.fast);form.append('translate','true');if(this.state.language!=='auto')form.append('language',this.state.language);const result=await this.uploadTranscription(form,null,()=>{});this.applyFastApiResult(result);this.state.translate=true;container.innerHTML=this.resultView();this.bindResult(container);if(typeof showToast==='function')showToast('English translation generated by the workspace service.','success');}catch(err){if(typeof showToast==='function')showToast(this.friendlyTranscriptionError(err),'error');}finally{button.disabled=false;button.classList.remove('loading');}
     },
     exportMindMap(){
       const topics=this.topTopics(this.state.transcript,8);
@@ -756,8 +896,8 @@
 
     cleanTranscript(t){return String(t||'').replace(/^WEBVTT.*$/gim,'').replace(/^\d+\s*$/gm,'').replace(/\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*.*$/gm,'').replace(/\r/g,'').replace(/^\s*$/gm,'').trim();},
     uploadError(c,msg){const e=c&&c.querySelector('#tsUploadError');if(!e)return;e.hidden=!msg;e.textContent=msg||'';},
-    friendlyError(e){const m=String(e&&e.message||e||'Unknown error');if(/decode|audio|unsupported|AudioContext/i.test(m))return 'Your browser could not decode this audio format. Try OGG/Opus, WAV, MP3, M4A, or convert the file to WAV and retry.';if(/memory|out of memory/i.test(m))return 'This recording is too large for the current browser memory. Try the Fast model or split the recording into shorter files.';if(/failed to fetch|network|fetch|connection|blocked by client/i.test(m))return 'The transcription service could not be reached. Please retry. If this persists, disable an extension that blocks network requests and reload ScriptFlow Pro.';if(/http 404|404/i.test(m))return 'The transcription service route was not found. Redeploy the FastAPI Render service with the supplied start command.';if(/http 413|too large/i.test(m))return 'This recording is too large. Try a shorter file or the Fast mode.';return m;},
-    modelLabel(){return this.state.model==='fast'?'Whisper Tiny':this.state.model==='accurate'?'Whisper Small':'Whisper Base';},
+    friendlyError(e){const m=String(e&&e.message||e||'Unknown error');if(/decode|audio|unsupported|AudioContext/i.test(m))return 'Your browser could not decode this audio format. Try OGG/Opus, WAV, MP3, M4A, or convert the file to WAV and retry.';if(/memory|out of memory/i.test(m))return 'This recording is too large for the current browser memory. Try the Fast model or split the recording into shorter files.';if(/network|fetch|load|cdn|model/i.test(m))return 'The AI model could not be loaded. Check your internet connection and try again.';return m;},
+    modelLabel(){return this.state.model==='fast'?'Fast · Whisper Tiny':this.state.model==='accurate'?'Higher accuracy · Whisper Small':'Balanced · Whisper Base';},
     formatBytes(n){if(!n)return '0 B';const u=['B','KB','MB','GB'];const i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),u.length-1);return `${(n/Math.pow(1024,i)).toFixed(i?1:0)} ${u[i]}`;},
     formatDuration(sec){if(!isFinite(sec)||sec<0)return '00:00';const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=Math.floor(sec%60);return h?`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;},
     formatClock(sec){return this.formatDuration(sec);},

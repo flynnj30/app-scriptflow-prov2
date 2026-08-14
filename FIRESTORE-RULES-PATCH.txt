@@ -1,0 +1,17 @@
+SCRIPTFlow Pro — Firestore appointment write rule
+
+The `Missing or insufficient permissions` error is enforced by Firebase Security Rules and cannot be fixed by browser JavaScript alone.
+
+Merge this match into your existing Firestore rules under:
+match /databases/{database}/documents {
+
+  match /users/{userId}/appointments/{appointmentId} {
+    allow read, create, update, delete: if request.auth != null
+      && request.auth.uid == userId;
+  }
+
+}
+
+Do NOT replace your entire rules file if you already have rules for users, scripts, tasks, teamMembers, etc. Add only the appointments match above inside the existing database documents block, then deploy the rules.
+
+The client code has also been changed so a permission-denied write no longer causes a drag/drop appointment to snap back to its previous server date. The moved appointment remains in local state and is queued for synchronization.
